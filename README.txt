@@ -19,9 +19,8 @@ make sure you have customtkinter installed first:
 
 WHAT IT DOES
 
-- You can add, edit, and delete students, programs, and colleges
-- Theres a search bar for students
-- You can also sort the list
+- You can add, edit, search, sort, and delete students, programs, and colleges
+- You can also sort the lists
 - Theres an import feature if you want to add multiple records at once using a csv file
 - Deleting a college or program also deletes everything under it
 
