@@ -95,9 +95,11 @@ def sort_records(data, sort_column, reverse=False): #Sorts based on column
         return data
     
     def get_sort_key(item): #Get Field to be sorted with
-        #Sorting by name sorts them by last name
+        #Sorting by name sorts by last name for students, by name field for programs/colleges
         if sort_column == "name":
-            return item["lastname"].lower() #Sort by last name and also .lower to prevent errors
+            if "lastname" in item:
+                return item["lastname"].lower() #Students: sort by last name
+            return item["name"].lower() #Programs/Colleges: sort by name field
   
         val = item[sort_column] #ID, Gender, Year, etc.
         if val.isdigit():
