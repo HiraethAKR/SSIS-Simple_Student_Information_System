@@ -6,7 +6,7 @@ This is my CCC151 project. Its a student information system where you can manage
 
 HOW TO RUN
 
-just double click: 
+just run: 
 	run.bat
 
 if that doesnt work try running this in the terminal:
@@ -42,6 +42,7 @@ students:
     2023-0001, Juan, Dela Cruz, BSCS, 1, Male
 
 You have to import colleges first then programs then students
+Importing students before program and program before college will not work.
 
 -----------------------------------------------------------------------
 
