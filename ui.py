@@ -71,6 +71,10 @@ class App(ctk.CTk):
         self.student_sort_reverse = False #Track sort direction per tab 
         self.program_sort_reverse = False #False means ascending
         self.college_sort_reverse = False #True means descending
+        self.program_search_var = ctk.StringVar() #Search var for programs
+        self.program_sort_var   = ctk.StringVar(value="Code") #Sort var for programs
+        self.college_search_var = ctk.StringVar() #Search var for colleges
+        self.college_sort_var   = ctk.StringVar(value="Code") #Sort var for colleges
 
         #Load everything into memory once at startup
         #Search, sort, and refresh all read from these instead of the CSV every time
@@ -356,6 +360,16 @@ class App(ctk.CTk):
         program_toolbar = ctk.CTkFrame(parent, fg_color="transparent")
         program_toolbar.pack(fill="x", pady=(0, 10))
 
+        program_search_entry = ctk.CTkEntry(program_toolbar, textvariable=self.program_search_var,
+                                            placeholder_text="Search...", font=FONT_BODY, height=36, width=260) #Searchbar
+        program_search_entry.pack(side="left", padx=(0, 8))
+        program_search_entry.bind("<KeyRelease>", lambda event: self._refresh_programs()) #Refresh on every keypress
+
+        ctk.CTkOptionMenu(program_toolbar, values=["Code", "Name"], #Sort dropdown
+                          variable=self.program_sort_var, font=FONT_BODY, height=36, width=120,
+                          fg_color=NAVY, button_color=NAVY, button_hover_color="#2d2d4e",
+                          command=lambda selected: self._refresh_programs()).pack(side="left", padx=(0, 8))
+
         self.program_order_button = ctk.CTkButton(program_toolbar, text="⤊ Asc", width=80, height=36,
                                                   fg_color=NAVY, font=FONT_BODY,
                                                   command=self._toggle_program_order) #Order toggle
@@ -380,7 +394,10 @@ class App(ctk.CTk):
     def _refresh_programs(self):
         for existing_row in self.program_list_frame.winfo_children(): #Clear existing rows
             existing_row.destroy()
-        program_list = manager.sort_records(self.all_programs, "code", self.program_sort_reverse) #Always sort by code
+        sort_column_map = {"Code": "code", "Name": "name"} #Map display name to field name
+        sort_column  = sort_column_map[self.program_sort_var.get()] #Get actual column name
+        program_list = manager.search_records(self.all_programs, self.program_search_var.get()) #Filter by search
+        program_list = manager.sort_records(program_list, sort_column, self.program_sort_reverse) #Sort the filtered list
         for row_index, program in enumerate(program_list):
             row_color = ODD if row_index % 2 == 0 else EVEN #Alternate row colors
             table_row = ctk.CTkFrame(self.program_list_frame, fg_color=row_color, corner_radius=4, height=40)
@@ -438,6 +455,16 @@ class App(ctk.CTk):
         college_toolbar = ctk.CTkFrame(parent, fg_color="transparent")
         college_toolbar.pack(fill="x", pady=(0, 10))
 
+        college_search_entry = ctk.CTkEntry(college_toolbar, textvariable=self.college_search_var,
+                                            placeholder_text="Search...", font=FONT_BODY, height=36, width=260) #Searchbar
+        college_search_entry.pack(side="left", padx=(0, 8))
+        college_search_entry.bind("<KeyRelease>", lambda event: self._refresh_colleges()) #Refresh on every keypress
+
+        ctk.CTkOptionMenu(college_toolbar, values=["Code", "Name"], #Sort dropdown
+                          variable=self.college_sort_var, font=FONT_BODY, height=36, width=120,
+                          fg_color=NAVY, button_color=NAVY, button_hover_color="#2d2d4e",
+                          command=lambda selected: self._refresh_colleges()).pack(side="left", padx=(0, 8))
+
         self.college_order_button = ctk.CTkButton(college_toolbar, text="⤊ Asc", width=80, height=36,
                                                   fg_color=NAVY, font=FONT_BODY,
                                                   command=self._toggle_college_order) #Order toggle
@@ -462,7 +489,10 @@ class App(ctk.CTk):
     def _refresh_colleges(self):
         for existing_row in self.college_list_frame.winfo_children(): #Clear existing rows
             existing_row.destroy()
-        college_list = manager.sort_records(self.all_colleges, "code", self.college_sort_reverse) #Sort by code
+        sort_column_map = {"Code": "code", "Name": "name"} #Map display name to field name
+        sort_column  = sort_column_map[self.college_sort_var.get()] #Get actual column name
+        college_list = manager.search_records(self.all_colleges, self.college_search_var.get()) #Filter by search
+        college_list = manager.sort_records(college_list, sort_column, self.college_sort_reverse) #Sort the filtered list
         for row_index, college in enumerate(college_list):
             row_color = ODD if row_index % 2 == 0 else EVEN #Alternate row colors for readability
             table_row = ctk.CTkFrame(self.college_list_frame, fg_color=row_color, corner_radius=4, height=40)
