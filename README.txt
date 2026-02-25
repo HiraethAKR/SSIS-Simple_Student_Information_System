@@ -6,14 +6,14 @@ This is my CCC151 project. Its a student information system where you can manage
 
 HOW TO RUN
 
+make sure you have customtkinter installed first:
+    pip install customtkinter
+
 just run: 
 	run.bat
 
 if that doesnt work try running this in the terminal:
     python main.py
-
-make sure you have customtkinter installed first:
-    pip install customtkinter
 
 -----------------------------------------------------------------------
 
