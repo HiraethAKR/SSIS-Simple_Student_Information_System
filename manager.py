@@ -1,69 +1,194 @@
-import csv
-import os
 import re
+import sqlite3
 
-STUDENT = "students.csv"
-PROGRAM = "programs.csv"
-COLLEGE = "colleges.csv"
+STUDENT = "students"
+PROGRAM = "programs"
+COLLEGE = "colleges"
+
+DB = "ssis.db" #SQLite database
+
+def get_connection(): #Opens and returns a connection to the database
+    connection = sqlite3.connect(DB) #Connect to the database
+    connection.row_factory = sqlite3.Row #Makes rows behave like dictionaries <--- Did this so I wont have to rewrite everything since I used csv for basically all of it
+    return connection #Return the connection to use in other functions
 
 STUDENT_FIELDS = ["id", "firstname", "lastname", "program_code", "year", "gender"]
 PROGRAM_FIELDS = ["code", "name", "college_code"]
 COLLEGE_FIELDS = ["code", "name"]
 
-def init_files():
-    files_to_check = [ #Check if files exists
-        (STUDENT, STUDENT_FIELDS),
-        (PROGRAM, PROGRAM_FIELDS),
-        (COLLEGE, COLLEGE_FIELDS)
-    ]
+def init_files(): #Create tables if they dont exist
+    connection = get_connection()
+    try:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS colleges (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+        """) #college
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS programs (
+                code         TEXT PRIMARY KEY,
+                name         TEXT NOT NULL,
+                college_code TEXT NOT NULL,
+                FOREIGN KEY (college_code) REFERENCES colleges(code)
+            )
+        """) #program
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS students (
+                id           TEXT PRIMARY KEY,
+                firstname    TEXT NOT NULL,
+                lastname     TEXT NOT NULL,
+                program_code TEXT NOT NULL,
+                year         TEXT NOT NULL,
+                gender       TEXT NOT NULL,
+                FOREIGN KEY (program_code) REFERENCES programs(code)
+            )
+        """) #students
+        connection.commit() #Save the changes
+    finally:
+        connection.close() #Always close even if something goes wrong
 
-    for filename, fields in files_to_check:
-        if not os.path.exists(filename): #Create files if they dont exist
-            with open(filename, mode='w', newline='', encoding='utf-8') as file:
-                writer = csv.DictWriter(file, fieldnames=fields)
-                writer.writeheader()
-
-def read_csv(filename):
+def fetch_all(table): #Read all records from a table and return as a list of dictionaries
+    connection = get_connection()
+    rows = connection.execute(f"SELECT * FROM {table}").fetchall() #Fetch all rows from the table
+    connection.close()
     data = []
-    if os.path.exists(filename): #Reads csv then returns the list
-        with open(filename, mode='r', newline='', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                data.append(row)
+    for row in rows:
+        data.append(dict(row)) #Convert each Row object to a dictionary
     return data
 
-def write_csv(filename, data, fieldnames):
-    with open(filename, mode='w', newline='', encoding='utf-8') as file: #Overwrite csv file with new list
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(data)
+def get_students(search, sort_col, reverse, page, page_size): #Fetch one page of students from the database
+    connection = get_connection()
 
-def add_record(filename, record, fieldnames): #Add new entry to csv
-    data = read_csv(filename)
-    data.append(record)
-    write_csv(filename, data, fieldnames)
+    order  = "DESC" if reverse else "ASC" #Ascending or descending
+    offset = (page - 1) * page_size       #Calculate how many rows to skip
+    like   = f"%{search}%"                #Wrap search term in wildcards
 
-def update_record(filename, pk_field, pk_value, updated_record, fieldnames): 
-    data = read_csv(filename)
-    success = False #Assume it failed until we find a match
+    where = "WHERE s.id LIKE ? OR s.firstname LIKE ? OR s.lastname LIKE ? OR s.program_code LIKE ? OR s.year LIKE ? OR s.gender LIKE ?"
+    params = [like, like, like, like, like, like] #One placeholder per WHERE condition
 
-    for i in range(len(data)):
-        if data[i][pk_field].lower() == pk_value.lower(): #Case-insensitive check
-            data[i] = updated_record
-            success = True
-            break
+    if sort_col == "college_code": #College isnt on the students table so we need a JOIN to sort by it
+        query = f"""
+            SELECT s.* FROM students s
+            JOIN programs p ON s.program_code = p.code
+            {where}
+            ORDER BY p.college_code {order}
+            LIMIT ? OFFSET ?
+        """
+    else:
+        sort_map = { #Map UI sort names to actual column names
+            "id":           "s.id",
+            "name":         "s.lastname",
+            "program_code": "s.program_code",
+            "year":         "s.year",
+            "gender":       "s.gender",
+        }
+        column = sort_map.get(sort_col, "s.id") #Default to id if not found
+        query = f"""
+            SELECT s.* FROM students s
+            {where}
+            ORDER BY {column} {order}
+            LIMIT ? OFFSET ?
+        """
 
-    if success:
-        write_csv(filename, data, fieldnames)
-    return success #Return if it worked or not
+    rows = connection.execute(query, params + [page_size, offset]).fetchall()
 
-def delete_record(filename, pk_field, pk_value, fieldnames): #Deletes a record
-    data = read_csv(filename)
-    new_data = [] #Create blank list
-    for row in data: #Copy data to new_data
-        if row[pk_field].lower() != pk_value.lower(): #Only copy data value if the primary key doesnt match with what we're trying to delete
-            new_data.append(row)
-    write_csv(filename, new_data, fieldnames)
+    count_query = f"SELECT COUNT(*) FROM students s {where}"
+    total_count = connection.execute(count_query, params).fetchone()[0] #Get total matching rows for page calculation
+
+    connection.close()
+
+    data = []
+    for row in rows:
+        data.append(dict(row)) #Convert to dictionaries
+    return data, total_count #Return the page and total count
+
+def get_programs(search, sort_col, reverse, page, page_size): #Fetch one page of programs from the database
+    connection = get_connection()
+
+    order    = "DESC" if reverse else "ASC" #Ascending or descending
+    sort_map = { #Map UI sort names to actual column names
+        "code": "code",
+        "name": "name",
+    }
+    column = sort_map.get(sort_col, "code") #Default to code if not found
+    offset = (page - 1) * page_size         #Calculate how many rows to skip
+
+    query = f"""
+        SELECT * FROM programs
+        WHERE code LIKE ? OR name LIKE ? OR college_code LIKE ?
+        ORDER BY {column} {order}
+        LIMIT ? OFFSET ?
+    """
+    like = f"%{search}%" #Wrap search term in wildcards
+    rows = connection.execute(query, [like, like, like, page_size, offset]).fetchall()
+
+    count_query = "SELECT COUNT(*) FROM programs WHERE code LIKE ? OR name LIKE ? OR college_code LIKE ?"
+    total_count = connection.execute(count_query, [like, like, like]).fetchone()[0] #Get total matching rows for page calculation
+
+    connection.close()
+
+    data = []
+    for row in rows:
+        data.append(dict(row)) #Convert to dictionaries
+    return data, total_count #Return the page and total count
+
+
+def get_colleges(search, sort_col, reverse, page, page_size): #Fetch one page of colleges from the database
+    connection = get_connection()
+
+    order    = "DESC" if reverse else "ASC" #Ascending or descending
+    sort_map = { #Map UI sort names to actual column names
+        "code": "code",
+        "name": "name",
+    }
+    column = sort_map.get(sort_col, "code") #Default to code if not found
+    offset = (page - 1) * page_size         #Calculate how many rows to skip
+
+    query = f"""
+        SELECT * FROM colleges
+        WHERE code LIKE ? OR name LIKE ?
+        ORDER BY {column} {order}
+        LIMIT ? OFFSET ?
+    """
+    like = f"%{search}%" #Wrap search term in wildcards
+    rows = connection.execute(query, [like, like, page_size, offset]).fetchall()
+
+    count_query = "SELECT COUNT(*) FROM colleges WHERE code LIKE ? OR name LIKE ?"
+    total_count = connection.execute(count_query, [like, like]).fetchone()[0] #Get total matching rows for page calculation
+
+    connection.close()
+
+    data = []
+    for row in rows:
+        data.append(dict(row)) #Convert to dictionaries
+    return data, total_count #Return the page and total count
+
+def add_record(table, record, fieldnames): #Insert a new record into the table
+    connection = get_connection()
+    placeholders = ", ".join(["?" for _ in fieldnames]) #Build "?, ?, ?" based on number of fields
+    columns      = ", ".join(fieldnames)                #Build "id, firstname, lastname, ..."
+    values       = [record[field] for field in fieldnames] #Pull values in the same order as columns
+    connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", values)
+    connection.commit() #Save
+    connection.close() #and close
+
+def update_record(table, pk_field, pk_value, updated_record, fieldnames): #Update a record in the table
+    connection = get_connection()
+    update_fields = [field for field in fieldnames if field != pk_field] #Dont include the primary key in the SET clause
+    set_clause    = ", ".join([f"{field} = ?" for field in update_fields]) #Build "firstname = ?, lastname = ?, ..."
+    values        = [updated_record[field] for field in update_fields]     #Pull values in the same order
+    values.append(updated_record[pk_field])                                #Add the new pk value at the end for the SET
+    values.append(pk_value)                                                #Add the old pk value for the WHERE clause
+    connection.execute(f"UPDATE {table} SET {set_clause}, {pk_field} = ? WHERE {pk_field} = ?", values)
+    connection.commit() #save
+    connection.close() #close
+
+def delete_record(table, pk_field, pk_value): #Delete a record from the table
+    connection = get_connection()
+    connection.execute(f"DELETE FROM {table} WHERE {pk_field} = ?", [pk_value]) #Delete record with matching pk value
+    connection.commit() #save
+    connection.close() #close
 
 def pk_check(data, pk_field, pk_value): #Check if primary key already exists/Need this to prevent duplication
     for row in data:
@@ -72,104 +197,63 @@ def pk_check(data, pk_field, pk_value): #Check if primary key already exists/Nee
     return False
 
 def format_check(student_id): #Check if ID follows YYYY-NNNN format
-    u_input = r"^\d{4}-\d{4}$" #Check if input: Starts(^), 4 digits(\d{4}), hypen(-), 4 digits(\d{4}), and ends($). All together - "^\d{4}-\d{4}$"
-    if re.match(u_input, student_id):
+    pattern = r"^\d{4}-\d{4}$" #Check if input: Starts(^), 4 digits(\d{4}), hypen(-), 4 digits(\d{4}), and ends($). All together - "^\d{4}-\d{4}$"
+    if re.match(pattern, student_id):
         return True
     return False
 
-def search_records(data, query): #Search the fields for a match
-    if not query:
-        return data # If search bar is empty, return everything
-    results = []
-    query = query.lower() # Make search case-insensitive
-    
-    for row in data: 
-        for value in row.values(): #Check every value in the current row
-            if query in value.lower(): #Lower case data before comparing
-                results.append(row)
-                break #Move to the next row as soon as we find one match in this one
-    return results
-
-def sort_records(data, sort_column, reverse=False): #Sorts based on column
-    if not data:
-        return data
-    
-    def get_sort_key(item): #Get Field to be sorted with
-        #Sorting by name sorts by last name for students, by name field for programs/colleges
-        if sort_column == "name":
-            if "lastname" in item:
-                return item["lastname"].lower() #Students: sort by last name
-            return item["name"].lower() #Programs/Colleges: sort by name field
-  
-        val = item[sort_column] #ID, Gender, Year, etc.
-        if val.isdigit():
-             return int(val) #Converts numbers to integer so it sorts properly | This sorts 10 first if not implemented
-        return val.lower() #.lower on everything so uppercase coming first than lowercase doesnt happen        
-        
-    return sorted(data, key=get_sort_key, reverse=reverse) #reverse=reverse controls ascending or descending order
-
-def update_college(old_code, new_record): #Cascading update
+def update_college(old_code, new_record): #Cascading update for college
     new_code = new_record["code"]
-        
-    update_record(COLLEGE, "code", old_code, new_record, COLLEGE_FIELDS) #Update the record in the csv
-        
-    if old_code.lower() != new_code.lower(): #Check if college code changed
-        programs = read_csv(PROGRAM)
-        for p in programs:
-            if p["college_code"].lower() == old_code.lower(): #Checks if any program was linked to old college code
-                p["college_code"] = new_code #Links program to new college code instead
-        write_csv(PROGRAM, programs, PROGRAM_FIELDS) #Updates the new links in the csv
+    update_record(COLLEGE, "code", old_code, new_record, COLLEGE_FIELDS) #Update the college record first
 
-def update_program(old_code, new_record): # Cascading update - program
+    if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
+        connection = get_connection()
+        connection.execute(
+            "UPDATE programs SET college_code = ? WHERE college_code = ?",
+            [new_code, old_code] #Set new college code for all programs that had the old one
+        )
+        connection.commit() #save
+        connection.close() #close
+
+def update_program(old_code, new_record): #Cascading update for program
     new_code = new_record["code"]
-    update_record(PROGRAM, "code", old_code, new_record, PROGRAM_FIELDS) #Update record in the csv
-        
-    if old_code.lower() != new_code.lower(): #check if program code changed
-        students = read_csv(STUDENT)
-        for s in students:
-            if s["program_code"].lower() == old_code.lower(): #Checks if any student is linked to old prgram code
-                s["program_code"] = new_code #Links students to new program code instead
-        write_csv(STUDENT, students, STUDENT_FIELDS) #Update the csv with new student to program links
+    update_record(PROGRAM, "code", old_code, new_record, PROGRAM_FIELDS) #Update the program record first
 
-def delete_college(college_code): #Cascading delete
-    programs = read_csv(PROGRAM) #Read programs once
-    students = read_csv(STUDENT) #Read students once
-    colleges = read_csv(COLLEGE)
+    if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
+        connection = get_connection()
+        connection.execute(
+            "UPDATE students SET program_code = ? WHERE program_code = ?",
+            [new_code, old_code] #Set new program code for all students that had the old one
+        )
+        connection.commit() #save
+        connection.close() #close
 
-    codes_to_delete = [] #Collect all program codes under this college
-    for p in programs:
-        if p["college_code"].lower() == college_code.lower(): #Check if program belongs to this college
-            codes_to_delete.append(p["code"])
+def delete_college(college_code): #Cascading delete for college
+    connection = get_connection()
+    connection.execute(
+        "DELETE FROM students WHERE program_code IN (SELECT code FROM programs WHERE college_code = ?)",
+        [college_code] #Delete all students enrolled in programs under this college
+    )
+    connection.execute(
+        "DELETE FROM programs WHERE college_code = ?",
+        [college_code] #Delete all programs under this college
+    )
+    connection.execute(
+        "DELETE FROM colleges WHERE code = ?",
+        [college_code] #Delete the college itself
+    )
+    connection.commit() #Save all three deletions
+    connection.close()  #Close
 
-    new_programs = [] #Filter out programs under this college
-    for p in programs:
-        if p["college_code"].lower() != college_code.lower():
-            new_programs.append(p)
-
-    new_students = [] #Filter out students enrolled in those programs
-    for s in students:
-        if s["program_code"].lower() not in [c.lower() for c in codes_to_delete]:
-            new_students.append(s)
-
-    new_colleges = [] #Filter out the college itself
-    for c in colleges:
-        if c["code"].lower() != college_code.lower():
-            new_colleges.append(c)
-
-    write_csv(PROGRAM,  new_programs, PROGRAM_FIELDS)  #Write all three once each
-    write_csv(STUDENT,  new_students, STUDENT_FIELDS)
-    write_csv(COLLEGE,  new_colleges, COLLEGE_FIELDS)
-
-def delete_program(program_code): #Cascading delete - program
-    new_programs = [] #Filter out the program
-    for p in read_csv(PROGRAM):
-        if p["code"].lower() != program_code.lower():
-            new_programs.append(p)
-
-    new_students = [] #Filter out linked students in one pass
-    for s in read_csv(STUDENT):
-        if s["program_code"].lower() != program_code.lower():
-            new_students.append(s)
-
-    write_csv(PROGRAM, new_programs, PROGRAM_FIELDS)
-    write_csv(STUDENT, new_students, STUDENT_FIELDS)
+def delete_program(program_code): #Cascading delete for program
+    connection = get_connection()
+    connection.execute(
+        "DELETE FROM students WHERE program_code = ?",
+        [program_code] #Delete all students under this program first
+    )
+    connection.execute(
+        "DELETE FROM programs WHERE code = ?",
+        [program_code] #Then delete the program itself
+    )
+    connection.commit() #Save both deletions
+    connection.close()  #Close

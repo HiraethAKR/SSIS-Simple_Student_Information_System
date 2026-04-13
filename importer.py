@@ -1,15 +1,23 @@
 import csv
 import manager
 
+VALID_GENDERS     = {"male", "female", "other"} #Allowed gender values (lowercase for comparison)
+VALID_YEAR_RANGE  = range(1, 11)               #Year level must be between 1 and 10
+
 def import_students(csv_file_path): #Read a csv file and add each row as a student
     total_added = 0
     skipped_reasons = [] #Rows that didnt get added and why
 
-    existing_students = manager.read_csv(manager.STUDENT) #Load once before the loop instead of reading the file every row
-    existing_programs = manager.read_csv(manager.PROGRAM) 
+    existing_students = manager.fetch_all(manager.STUDENT) #Load once before the loop instead of reading the file every row
+    existing_programs = manager.fetch_all(manager.PROGRAM)
 
     with open(csv_file_path, mode='r', newline='', encoding='utf-8') as csv_file:
         csv_reader = csv.DictReader(csv_file) #Read CSV file with headers
+
+        required_columns = ["id", "firstname", "lastname", "program_code", "year", "gender"]
+        if csv_reader.fieldnames is None or not all(col in csv_reader.fieldnames for col in required_columns): #Check that all expected columns exist before processing any rows
+            missing = [col for col in required_columns if csv_reader.fieldnames is None or col not in csv_reader.fieldnames]
+            return 0, [f"Wrong column names — missing: {', '.join(missing)}. Expected: {', '.join(required_columns)}"]
 
         for current_row in csv_reader:
             student_id   = current_row.get("id",           "").strip() #Get student ID and remove whitespace
@@ -25,6 +33,14 @@ def import_students(csv_file_path): #Read a csv file and add each row as a stude
 
             if not manager.format_check(student_id): #Skip if ID doesnt follow YYYY-NNNN format
                 skipped_reasons.append(f"'{student_id}' — invalid ID format, must be YYYY-NNNN")
+                continue
+
+            if not year_level.isdigit() or int(year_level) not in VALID_YEAR_RANGE: #Skip if year is not a number between 1 and 10
+                skipped_reasons.append(f"'{student_id}' — invalid year '{year_level}', must be 1 to 10")
+                continue
+
+            if gender.lower() not in VALID_GENDERS: #Skip if gender is not one of the accepted values
+                skipped_reasons.append(f"'{student_id}' — invalid gender '{gender}', must be Male, Female, or Other")
                 continue
 
             if not manager.pk_check(existing_programs, "code", program_code): #Skip if program doesnt exist in system
@@ -54,11 +70,16 @@ def import_programs(csv_file_path): #Read a csv file and add each row as a progr
     total_added = 0
     skipped_reasons = [] #Rows that didnt get added and why
 
-    existing_programs = manager.read_csv(manager.PROGRAM) #Load once before the loop instead of reading the file every row
-    existing_colleges = manager.read_csv(manager.COLLEGE) #Same here
+    existing_programs = manager.fetch_all(manager.PROGRAM) #Load once before the loop instead of reading the file every row
+    existing_colleges = manager.fetch_all(manager.COLLEGE) #Same here
 
     with open(csv_file_path, mode='r', newline='', encoding='utf-8') as csv_file:
         csv_reader = csv.DictReader(csv_file) #Read CSV file with headers
+
+        required_columns = ["code", "name", "college_code"]
+        if csv_reader.fieldnames is None or not all(col in csv_reader.fieldnames for col in required_columns): #Check that all expected columns exist before processing any rows
+            missing = [col for col in required_columns if csv_reader.fieldnames is None or col not in csv_reader.fieldnames]
+            return 0, [f"Wrong column names — missing: {', '.join(missing)}. Expected: {', '.join(required_columns)}"]
 
         for current_row in csv_reader:
             program_code = current_row.get("code",         "").strip() #Get program code and remove whitespace
@@ -89,10 +110,15 @@ def import_colleges(csv_file_path): #Read a csv file and add each row as a colle
     total_added = 0
     skipped_reasons = [] #Rows that didnt get added and why
 
-    existing_colleges = manager.read_csv(manager.COLLEGE) #Load once before the loop instead of reading the file every row
+    existing_colleges = manager.fetch_all(manager.COLLEGE) #Load once before the loop instead of reading the file every row
 
     with open(csv_file_path, mode='r', newline='', encoding='utf-8') as csv_file:
         csv_reader = csv.DictReader(csv_file) #Read CSV file with headers
+
+        required_columns = ["code", "name"]
+        if csv_reader.fieldnames is None or not all(col in csv_reader.fieldnames for col in required_columns): #Check that all expected columns exist before processing any rows
+            missing = [col for col in required_columns if csv_reader.fieldnames is None or col not in csv_reader.fieldnames]
+            return 0, [f"Wrong column names — missing: {', '.join(missing)}. Expected: {', '.join(required_columns)}"]
 
         for current_row in csv_reader:
             college_code = current_row.get("code", "").strip() #Get college code and remove whitespace
