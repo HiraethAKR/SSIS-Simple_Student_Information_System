@@ -90,7 +90,7 @@ class App(ctk.CTk):
         #Students dont store college directly so look it up through dictionary that maps program_code -> college_codes
         self.program_to_college = {}
         for p in self.all_programs:
-            self.program_to_college[p["code"]] = p["college_code"]
+            self.program_to_college[p["code"].lower()] = p["college_code"]
 
         self._build_header()
         self._build_tabs()
@@ -102,7 +102,7 @@ class App(ctk.CTk):
         self.all_colleges = manager.fetch_all(manager.COLLEGE) #Reload colleges
         self.program_to_college = {} #Rebuild the lookup too
         for p in self.all_programs:
-            self.program_to_college[p["code"]] = p["college_code"]
+            self.program_to_college[p["code"].lower()] = p["college_code"]
 
     def _build_header(self):
         header_bar = ctk.CTkFrame(self, fg_color=NAVY, corner_radius=0, height=70) #Header
@@ -364,7 +364,7 @@ class App(ctk.CTk):
 
         for row_index, student in enumerate(page_of_students): #Insert each student as a treeview row
             display_name = student["lastname"] + ", " + student["firstname"] #Format name as Lastname, Firstname
-            college_code = self.program_to_college.get(student["program_code"], "N/A") #Look up the college through the program
+            college_code = self.program_to_college.get((student["program_code"] or "").lower(), "N/A") #Look up the college through the program (with lowercase logic)
             tag = "odd" if row_index % 2 == 0 else "even" #Alternate row colors
             self.student_tree.insert("", "end", iid=student["id"], tags=(tag,), #Use student ID as the row identifier
                                      values=(student["id"], display_name, student["program_code"],
@@ -406,9 +406,21 @@ class App(ctk.CTk):
 
     def _add_student(self):
         def save(form_values):
-            self.all_students = manager.fetch_all(manager.STUDENT) #Reload before pk_check to catch latest records
+            # Trim whitespace and run validations
+            form_values["id"] = form_values["id"].strip()
+            form_values["firstname"] = form_values["firstname"].strip()
+            form_values["lastname"] = form_values["lastname"].strip()
+
+            if not form_values["id"]:
+                messagebox.showerror("Missing ID", "ID is required."); return
             if not manager.format_check(form_values["id"]): #Check YYYY-NNNN format
                 messagebox.showerror("Invalid ID", "ID must follow YYYY-NNNN format."); return
+            if not form_values["firstname"] or not form_values["lastname"]:
+                messagebox.showerror("Missing Fields", "First Name and Last Name cannot be blank."); return
+            if form_values["program_code"] in ["(No programs yet)", ""]:
+                messagebox.showerror("Invalid Program", "Please select a valid program."); return
+
+            self.all_students = manager.fetch_all(manager.STUDENT) #Reload before pk_check to catch latest records
             if manager.pk_check(self.all_students, "id", form_values["id"]): #Check for duplicate ID
                 messagebox.showerror("Duplicate", "This ID already exists."); return
             manager.add_record(manager.STUDENT, form_values, manager.STUDENT_FIELDS) #Record new student
@@ -418,9 +430,21 @@ class App(ctk.CTk):
 
     def _edit_student(self, student):
         def save(form_values):
-            self.all_students = manager.fetch_all(manager.STUDENT) #Reload before pk_check to catch latest records
+            # Trim whitespace and run validations
+            form_values["id"] = form_values["id"].strip()
+            form_values["firstname"] = form_values["firstname"].strip()
+            form_values["lastname"] = form_values["lastname"].strip()
+
+            if not form_values["id"]:
+                messagebox.showerror("Missing ID", "ID is required."); return
             if not manager.format_check(form_values["id"]): #Check YYYY-NNNN format
                 messagebox.showerror("Invalid ID", "ID must follow YYYY-NNNN format."); return
+            if not form_values["firstname"] or not form_values["lastname"]:
+                messagebox.showerror("Missing Fields", "First Name and Last Name cannot be blank."); return
+            if form_values["program_code"] in ["(No programs yet)", ""]:
+                messagebox.showerror("Invalid Program", "Please select a valid program."); return
+
+            self.all_students = manager.fetch_all(manager.STUDENT) #Reload before pk_check to catch latest records
             id_was_changed = form_values["id"].lower() != student["id"].lower() #Check if user changed ID
             if id_was_changed and manager.pk_check(self.all_students, "id", form_values["id"]): #Only check duplicate if ID changed
                 messagebox.showerror("Duplicate", "This ID already exists."); return
@@ -566,8 +590,14 @@ class App(ctk.CTk):
 
     def _add_program(self):
         def save(form_values):
+            # Trim whitespace and run validations
+            form_values["code"] = form_values["code"].strip()
+            form_values["name"] = form_values["name"].strip()
+
             if not form_values["code"] or not form_values["name"]: #Check if required fields are empty
                 messagebox.showerror("Missing Fields", "Code and Name are required."); return
+            if form_values["college_code"] in ["(No colleges yet)", ""]:
+                messagebox.showerror("Invalid College", "Please select a valid college."); return
             if manager.pk_check(self.all_programs, "code", form_values["code"]): #Check for duplicate program code
                 messagebox.showerror("Duplicate", "This program code already exists."); return
             manager.add_record(manager.PROGRAM, form_values, manager.PROGRAM_FIELDS) #Add the new program record
@@ -577,8 +607,14 @@ class App(ctk.CTk):
 
     def _edit_program(self, program):
         def save(form_values):
+            # Trim whitespace and run validations
+            form_values["code"] = form_values["code"].strip()
+            form_values["name"] = form_values["name"].strip()
+
             if not form_values["code"] or not form_values["name"]: #Check if required fields are empty
                 messagebox.showerror("Missing Fields", "Code and Name are required."); return
+            if form_values["college_code"] in ["(No colleges yet)", ""]:
+                messagebox.showerror("Invalid College", "Please select a valid college."); return
             code_was_changed = form_values["code"].lower() != program["code"].lower() #Check if user changed the code
             if code_was_changed and manager.pk_check(self.all_programs, "code", form_values["code"]): #Only check duplicate if code changed
                 messagebox.showerror("Duplicate", "This program code already exists."); return
@@ -719,6 +755,10 @@ class App(ctk.CTk):
 
     def _add_college(self):
         def save(form_values):
+            # Trim whitespace and run validations
+            form_values["code"] = form_values["code"].strip()
+            form_values["name"] = form_values["name"].strip()
+
             if not form_values["code"] or not form_values["name"]: #Check if required fields are empty
                 messagebox.showerror("Missing Fields", "Code and Name are required."); return
             if manager.pk_check(self.all_colleges, "code", form_values["code"]): #Check for duplicate college code
@@ -730,6 +770,10 @@ class App(ctk.CTk):
 
     def _edit_college(self, college):
         def save(form_values):
+            # Trim whitespace and run validations
+            form_values["code"] = form_values["code"].strip()
+            form_values["name"] = form_values["name"].strip()
+
             if not form_values["code"] or not form_values["name"]: #Check if required fields are empty
                 messagebox.showerror("Missing Fields", "Code and Name are required."); return
             code_was_changed = form_values["code"].lower() != college["code"].lower() #Check if user changed the code
@@ -738,7 +782,7 @@ class App(ctk.CTk):
             manager.update_college(college["code"], form_values) #Update the college record
             self._reload_data()
             edit_college_popup.destroy(); self._refresh_colleges(); self._refresh_programs(); self._update_counters() #Refresh programs too since they link to colleges
-        edit_college_popup = PopupForm(self, "Edit College", self._college_fields(), save, initial=college) #Create popup with existing college data
+        edit_college_popup = PopupForm(self, "Edit College", self._college_fields(), save, initial=college) #Create popup existing college data
 
     def _delete_college(self, college):
         if messagebox.askyesno("Delete", f"Delete '{college['code']}'?\nAll programs and students under it will also be deleted."): #Confirmation

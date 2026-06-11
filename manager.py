@@ -9,7 +9,7 @@ DB = "ssis.db" #SQLite database
 
 def get_connection(): #Opens and returns a connection to the database
     connection = sqlite3.connect(DB) #Connect to the database
-    connection.row_factory = sqlite3.Row #Makes rows behave like dictionaries <--- Did this so I wont have to rewrite everything since I used csv for basically all of it
+    connection.row_factory = sqlite3.Row #Makes rows behave like dictionaries
     return connection #Return the connection to use in other functions
 
 STUDENT_FIELDS = ["id", "firstname", "lastname", "program_code", "year", "gender"]
@@ -166,29 +166,73 @@ def get_colleges(search, sort_col, reverse, page, page_size): #Fetch one page of
 
 def add_record(table, record, fieldnames): #Insert a new record into the table
     connection = get_connection()
-    placeholders = ", ".join(["?" for _ in fieldnames]) #Build "?, ?, ?" based on number of fields
-    columns      = ", ".join(fieldnames)                #Build "id, firstname, lastname, ..."
-    values       = [record[field] for field in fieldnames] #Pull values in the same order as columns
-    connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", values)
-    connection.commit() #Save
-    connection.close() #and close
+    try:
+        placeholders = ", ".join(["?" for _ in fieldnames]) #Build "?, ?, ?" based on number of fields
+        columns      = ", ".join(fieldnames)                #Build "id, firstname, lastname, ..."
+        values       = [record[field] for field in fieldnames] #Pull values in the same order as columns
+        connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", values)
+        connection.commit() #Save
+        return True
+    except sqlite3.Error as e:
+        from tkinter import messagebox
+        messagebox.showerror("Database Error", f"Unable to save record: {e}")
+        return False
+    finally:
+        connection.close() #and close
+
+def add_records(table, records, fieldnames): #Insert multiple records in a single transaction
+    if not records:
+        return True
+    connection = get_connection()
+    try:
+        placeholders = ", ".join(["?" for _ in fieldnames])
+        columns      = ", ".join(fieldnames)
+        query        = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+        
+        data_tuples = []
+        for r in records:
+            data_tuples.append([r[field] for field in fieldnames])
+            
+        connection.executemany(query, data_tuples)
+        connection.commit()
+        return True
+    except sqlite3.Error as e:
+        from tkinter import messagebox
+        messagebox.showerror("Database Error", f"Bulk write operation failed: {e}")
+        return False
+    finally:
+        connection.close()
 
 def update_record(table, pk_field, pk_value, updated_record, fieldnames): #Update a record in the table
     connection = get_connection()
-    update_fields = [field for field in fieldnames if field != pk_field] #Dont include the primary key in the SET clause
-    set_clause    = ", ".join([f"{field} = ?" for field in update_fields]) #Build "firstname = ?, lastname = ?, ..."
-    values        = [updated_record[field] for field in update_fields]     #Pull values in the same order
-    values.append(updated_record[pk_field])                                #Add the new pk value at the end for the SET
-    values.append(pk_value)                                                #Add the old pk value for the WHERE clause
-    connection.execute(f"UPDATE {table} SET {set_clause}, {pk_field} = ? WHERE {pk_field} = ?", values)
-    connection.commit() #save
-    connection.close() #close
+    try:
+        update_fields = [field for field in fieldnames if field != pk_field] #Dont include the primary key in the SET clause
+        set_clause    = ", ".join([f"{field} = ?" for field in update_fields]) #Build "firstname = ?, lastname = ?, ..."
+        values        = [updated_record[field] for field in update_fields]     #Pull values in the same order
+        values.append(updated_record[pk_field])                                #Add the new pk value at the end for the SET
+        values.append(pk_value)                                                #Add the old pk value for the WHERE clause
+        connection.execute(f"UPDATE {table} SET {set_clause}, {pk_field} = ? WHERE {pk_field} = ?", values)
+        connection.commit() #save
+        return True
+    except sqlite3.Error as e:
+        from tkinter import messagebox
+        messagebox.showerror("Database Error", f"Unable to update record: {e}")
+        return False
+    finally:
+        connection.close() #close
 
 def delete_record(table, pk_field, pk_value): #Delete a record from the table
     connection = get_connection()
-    connection.execute(f"DELETE FROM {table} WHERE {pk_field} = ?", [pk_value]) #Delete record with matching pk value
-    connection.commit() #save
-    connection.close() #close
+    try:
+        connection.execute(f"DELETE FROM {table} WHERE {pk_field} = ?", [pk_value]) #Delete record with matching pk value
+        connection.commit() #save
+        return True
+    except sqlite3.Error as e:
+        from tkinter import messagebox
+        messagebox.showerror("Database Error", f"Unable to delete record: {e}")
+        return False
+    finally:
+        connection.close() #close
 
 def pk_check(data, pk_field, pk_value): #Check if primary key already exists/Need this to prevent duplication
     for row in data:
@@ -208,12 +252,17 @@ def update_college(old_code, new_record): #Cascading update for college
 
     if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
         connection = get_connection()
-        connection.execute(
-            "UPDATE programs SET college_code = ? WHERE college_code = ?",
-            [new_code, old_code] #Set new college code for all programs that had the old one
-        )
-        connection.commit() #save
-        connection.close() #close
+        try:
+            connection.execute(
+                "UPDATE programs SET college_code = ? WHERE college_code = ?",
+                [new_code, old_code] #Set new college code for all programs that had the old one
+            )
+            connection.commit() #save
+        except sqlite3.Error as e:
+            from tkinter import messagebox
+            messagebox.showerror("Database Error", f"Cascading college update failed: {e}")
+        finally:
+            connection.close() #close
 
 def update_program(old_code, new_record): #Cascading update for program
     new_code = new_record["code"]
@@ -221,39 +270,54 @@ def update_program(old_code, new_record): #Cascading update for program
 
     if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
         connection = get_connection()
-        connection.execute(
-            "UPDATE students SET program_code = ? WHERE program_code = ?",
-            [new_code, old_code] #Set new program code for all students that had the old one
-        )
-        connection.commit() #save
-        connection.close() #close
+        try:
+            connection.execute(
+                "UPDATE students SET program_code = ? WHERE program_code = ?",
+                [new_code, old_code] #Set new program code for all students that had the old one
+            )
+            connection.commit() #save
+        except sqlite3.Error as e:
+            from tkinter import messagebox
+            messagebox.showerror("Database Error", f"Cascading program update failed: {e}")
+        finally:
+            connection.close() #close
 
 def delete_college(college_code): #Cascading delete for college
     connection = get_connection()
-    connection.execute(
-        "DELETE FROM students WHERE program_code IN (SELECT code FROM programs WHERE college_code = ?)",
-        [college_code] #Delete all students enrolled in programs under this college
-    )
-    connection.execute(
-        "DELETE FROM programs WHERE college_code = ?",
-        [college_code] #Delete all programs under this college
-    )
-    connection.execute(
-        "DELETE FROM colleges WHERE code = ?",
-        [college_code] #Delete the college itself
-    )
-    connection.commit() #Save all three deletions
-    connection.close()  #Close
+    try:
+        connection.execute(
+            "DELETE FROM students WHERE program_code IN (SELECT code FROM programs WHERE college_code = ?)",
+            [college_code] #Delete all students enrolled in programs under this college
+        )
+        connection.execute(
+            "DELETE FROM programs WHERE college_code = ?",
+            [college_code] #Delete all programs under this college
+        )
+        connection.execute(
+            "DELETE FROM colleges WHERE code = ?",
+            [college_code] #Delete the college itself
+        )
+        connection.commit() #Save all three deletions
+    except sqlite3.Error as e:
+        from tkinter import messagebox
+        messagebox.showerror("Database Error", f"Cascading college deletion failed: {e}")
+    finally:
+        connection.close()  #Close
 
 def delete_program(program_code): #Cascading delete for program
     connection = get_connection()
-    connection.execute(
-        "DELETE FROM students WHERE program_code = ?",
-        [program_code] #Delete all students under this program first
-    )
-    connection.execute(
-        "DELETE FROM programs WHERE code = ?",
-        [program_code] #Then delete the program itself
-    )
-    connection.commit() #Save both deletions
-    connection.close()  #Close
+    try:
+        connection.execute(
+            "DELETE FROM students WHERE program_code = ?",
+            [program_code] #Delete all students under this program first
+        )
+        connection.execute(
+            "DELETE FROM programs WHERE code = ?",
+            [program_code] #Then delete the program itself
+        )
+        connection.commit() #Save both deletions
+    except sqlite3.Error as e:
+        from tkinter import messagebox
+        messagebox.showerror("Database Error", f"Cascading program deletion failed: {e}")
+    finally:
+        connection.close()  #Close
