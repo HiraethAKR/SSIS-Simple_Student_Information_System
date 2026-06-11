@@ -1,6 +1,9 @@
 import csv
 import manager
 
+import csv
+import manager
+
 def import_students(csv_file_path): #Read a csv file and add each row as a student
     total_added = 0
     skipped_reasons = [] #Rows that didnt get added and why
@@ -12,12 +15,13 @@ def import_students(csv_file_path): #Read a csv file and add each row as a stude
         csv_reader = csv.DictReader(csv_file) #Read CSV file with headers
 
         for current_row in csv_reader:
-            student_id   = current_row.get("id",           "").strip() #Get student ID and remove whitespace
-            first_name   = current_row.get("firstname",    "").strip() #Get first name and remove whitespace
-            last_name    = current_row.get("lastname",     "").strip() #Get last name and remove whitespace
-            program_code = current_row.get("program_code", "").strip() #Get program code and remove whitespace
-            year_level   = current_row.get("year",         "").strip() #Get year level and remove whitespace
-            gender       = current_row.get("gender",       "").strip() #Get gender and remove whitespace
+            # Safely get value and fallback to empty string if None
+            student_id   = (current_row.get("id") or "").strip() 
+            first_name   = (current_row.get("firstname") or "").strip() 
+            last_name    = (current_row.get("lastname") or "").strip() 
+            program_code = (current_row.get("program_code") or "").strip() 
+            year_level   = (current_row.get("year") or "").strip() 
+            gender       = (current_row.get("gender") or "").strip() 
 
             if not student_id or not first_name or not last_name: #Skip if required fields are empty
                 skipped_reasons.append(f"Row with id '{student_id}' — missing required fields (id, firstname, lastname)")
@@ -61,9 +65,9 @@ def import_programs(csv_file_path): #Read a csv file and add each row as a progr
         csv_reader = csv.DictReader(csv_file) #Read CSV file with headers
 
         for current_row in csv_reader:
-            program_code = current_row.get("code",         "").strip() #Get program code and remove whitespace
-            program_name = current_row.get("name",         "").strip() #Get program name and remove whitespace
-            college_code = current_row.get("college_code", "").strip() #Get college code and remove whitespace
+            program_code = (current_row.get("code") or "").strip()
+            program_name = (current_row.get("name") or "").strip()
+            college_code = (current_row.get("college_code") or "").strip()
 
             if not program_code or not program_name: #Skip if required fields are empty
                 skipped_reasons.append(f"Row with code '{program_code}' — missing required fields (code, name)")
@@ -95,8 +99,8 @@ def import_colleges(csv_file_path): #Read a csv file and add each row as a colle
         csv_reader = csv.DictReader(csv_file) #Read CSV file with headers
 
         for current_row in csv_reader:
-            college_code = current_row.get("code", "").strip() #Get college code and remove whitespace
-            college_name = current_row.get("name", "").strip() #Get college name and remove whitespace
+            college_code = (current_row.get("code") or "").strip()
+            college_name = (current_row.get("name") or "").strip()
 
             if not college_code or not college_name: #Skip if required fields are empty
                 skipped_reasons.append(f"Row with code '{college_code}' — missing required fields (code, name)")
