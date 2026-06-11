@@ -231,6 +231,10 @@ class App(ctk.CTk):
     def _build_student_tab(self, parent):
         self.student_search_var = ctk.StringVar()
         self.student_sort_var   = ctk.StringVar(value="ID")
+        
+        # Pagination variables
+        self.student_page_size = 50
+        self.student_current_page = 1
 
         student_toolbar = ctk.CTkFrame(parent, fg_color="transparent") #Build search/sort bar and order toggle
         student_toolbar.pack(fill="x", pady=(0, 10))
@@ -238,12 +242,14 @@ class App(ctk.CTk):
         search_entry = ctk.CTkEntry(student_toolbar, textvariable=self.student_search_var,
                                     placeholder_text="Search...", font=FONT_BODY, height=36, width=260) #Searchbar
         search_entry.pack(side="left", padx=(0, 8))
-        search_entry.bind("<KeyRelease>", lambda event: self._refresh_students()) #Refresh on every keypress
+        
+        # Reset to page 1 on search so we don't end up on an out-of-bounds page
+        search_entry.bind("<KeyRelease>", lambda event: self._reset_and_refresh_students()) 
 
         ctk.CTkOptionMenu(student_toolbar, values=["ID", "Name", "Program", "College", "Year", "Gender"], #Sort bar
                           variable=self.student_sort_var, font=FONT_BODY, height=36, width=150,
                           fg_color=NAVY, button_color=NAVY, button_hover_color="#2d2d4e", #Change color when hovering
-                          command=lambda selected: self._refresh_students()).pack(side="left", padx=(0, 8)) #Dropdown to choose sort column
+                          command=lambda selected: self._reset_and_refresh_students()).pack(side="left", padx=(0, 8)) #Dropdown to choose sort column
 
         self.student_order_button = ctk.CTkButton(student_toolbar, text="⤊ Asc", width=80, height=36,#Order toggle
                                                   fg_color=NAVY, font=FONT_BODY,
@@ -260,9 +266,42 @@ class App(ctk.CTk):
             ("College", 90), ("Year", 50), ("Gender", 90), ("Actions", 160)
         ])
 
-        self.student_list_frame = ctk.CTkScrollableFrame(parent, fg_color="transparent") #Scrolling bar
-        self.student_list_frame.pack(fill="both", expand=True)
+        # Pagination Footer (packed at the bottom)
+        self.student_footer = ctk.CTkFrame(parent, fg_color="transparent")
+        self.student_footer.pack(fill="x", side="bottom", pady=(10, 0))
+
+        self.btn_prev_student = ctk.CTkButton(self.student_footer, text="◀ Prev", width=80, height=32,
+                                              fg_color=NAVY, hover_color="#2d2d4e", font=FONT_BODY,
+                                              command=self._prev_student_page)
+        self.btn_prev_student.pack(side="left", padx=5)
+
+        self.lbl_page_student = ctk.CTkLabel(self.student_footer, text="Page 1 of 1", font=FONT_HEADER)
+        self.lbl_page_student.pack(side="left", expand=True)
+
+        self.btn_next_student = ctk.CTkButton(self.student_footer, text="Next ▶", width=80, height=32,
+                                              fg_color=NAVY, hover_color="#2d2d4e", font=FONT_BODY,
+                                              command=self._next_student_page)
+        self.btn_next_student.pack(side="right", padx=5)
+
+        # Student Scrollable Frame (packed above the footer)
+        self.student_list_frame = ctk.CTkScrollableFrame(parent, fg_color="transparent") 
+        self.student_list_frame.pack(fill="both", expand=True, side="top")
+        
         self._refresh_students() #Load and display all students
+
+    # Helper methods for pagination
+    def _reset_and_refresh_students(self):
+        self.student_current_page = 1
+        self._refresh_students()
+
+    def _prev_student_page(self):
+        if self.student_current_page > 1:
+            self.student_current_page -= 1
+            self._refresh_students()
+
+    def _next_student_page(self):
+        self.student_current_page += 1
+        self._refresh_students()
 
     def _toggle_student_order(self): #Order toggle
         self.student_sort_reverse = not self.student_sort_reverse #Toggle ascending/descending
@@ -291,7 +330,35 @@ class App(ctk.CTk):
         else:
             student_list = manager.sort_records(student_list, sort_column, self.student_sort_reverse) #Use sorting in manager file
 
-        for row_index, student in enumerate(student_list):
+        # Calculate pages based on the search/filtered list size
+        total_records = len(student_list)
+        total_pages = max(1, (total_records + self.student_page_size - 1) // self.student_page_size)
+        
+        # Clamp page inside valid ranges
+        if self.student_current_page > total_pages:
+            self.student_current_page = total_pages
+        if self.student_current_page < 1:
+            self.student_current_page = 1
+
+        # Update Footer UI elements
+        self.lbl_page_student.configure(text=f"Page {self.student_current_page} of {total_pages} ({total_records} students total)")
+
+        if self.student_current_page == 1:
+            self.btn_prev_student.configure(state="disabled", fg_color="#dee2e6", text_color="#adb5bd")
+        else:
+            self.btn_prev_student.configure(state="normal", fg_color=NAVY, text_color="white")
+
+        if self.student_current_page == total_pages:
+            self.btn_next_student.configure(state="disabled", fg_color="#dee2e6", text_color="#adb5bd")
+        else:
+            self.btn_next_student.configure(state="normal", fg_color=NAVY, text_color="white")
+
+        # Slice the student list for the current page
+        start_idx = (self.student_current_page - 1) * self.student_page_size
+        end_idx = start_idx + self.student_page_size
+        paginated_list = student_list[start_idx:end_idx]
+
+        for row_index, student in enumerate(paginated_list):
             row_color = ODD if row_index % 2 == 0 else EVEN #Alternate row colors
             table_row = ctk.CTkFrame(self.student_list_frame, fg_color=row_color, corner_radius=4, height=40)
             table_row.pack(fill="x", pady=1)
@@ -354,6 +421,7 @@ class App(ctk.CTk):
             manager.delete_record(manager.STUDENT, "id", student["id"], manager.STUDENT_FIELDS) #Delete student record
             self._reload_data()
             self._refresh_students(); self._update_counters() #Refresh table and update counters
+
 
     # ── Programs ──────────────────────────────────────────────
     def _build_program_tab(self, parent):
@@ -449,6 +517,7 @@ class App(ctk.CTk):
             manager.delete_program(program["code"]) #Delete the program
             self._reload_data()
             self._refresh_programs(); self._refresh_students(); self._update_counters() #Refresh both tables and update counters
+
 
     # ── Colleges ──────────────────────────────────────────────
     def _build_college_tab(self, parent):
