@@ -108,11 +108,11 @@ def sort_records(data, sort_column, reverse=False): #Sorts based on column
         
     return sorted(data, key=get_sort_key, reverse=reverse) #reverse=reverse controls ascending or descending order
 
-def update_college(old_code, new_record): #Cascading update
+def update_college(old_code, new_record): #Cascading update - relinks programs (and thus their students) to the new college code
     new_code = new_record["code"]
-        
+
     update_record(COLLEGE, "code", old_code, new_record, COLLEGE_FIELDS) #Update the record in the csv
-        
+
     if old_code.lower() != new_code.lower(): #Check if college code changed
         programs = read_csv(PROGRAM)
         for p in programs:
@@ -120,56 +120,45 @@ def update_college(old_code, new_record): #Cascading update
                 p["college_code"] = new_code #Links program to new college code instead
         write_csv(PROGRAM, programs, PROGRAM_FIELDS) #Updates the new links in the csv
 
-def update_program(old_code, new_record): # Cascading update - program
+def update_program(old_code, new_record): #Cascading update - relinks students to the new program code
     new_code = new_record["code"]
     update_record(PROGRAM, "code", old_code, new_record, PROGRAM_FIELDS) #Update record in the csv
-        
+
     if old_code.lower() != new_code.lower(): #check if program code changed
         students = read_csv(STUDENT)
         for s in students:
-            if s["program_code"].lower() == old_code.lower(): #Checks if any student is linked to old prgram code
+            if s["program_code"].lower() == old_code.lower(): #Checks if any student is linked to old program code
                 s["program_code"] = new_code #Links students to new program code instead
         write_csv(STUDENT, students, STUDENT_FIELDS) #Update the csv with new student to program links
 
-def delete_college(college_code): #Cascading delete
-    programs = read_csv(PROGRAM) #Read programs once
-    students = read_csv(STUDENT) #Read students once
+def delete_college(college_code): #No cascading delete - linked programs get college_code set to NULL
+    programs = read_csv(PROGRAM)
     colleges = read_csv(COLLEGE)
 
-    codes_to_delete = [] #Collect all program codes under this college
-    for p in programs:
-        if p["college_code"].lower() == college_code.lower(): #Check if program belongs to this college
-            codes_to_delete.append(p["code"])
-
-    new_programs = [] #Filter out programs under this college
-    for p in programs:
-        if p["college_code"].lower() != college_code.lower():
-            new_programs.append(p)
-
-    new_students = [] #Filter out students enrolled in those programs
-    for s in students:
-        if s["program_code"].lower() not in [c.lower() for c in codes_to_delete]:
-            new_students.append(s)
+    for p in programs: #Null out the link instead of deleting linked programs
+        if p["college_code"].lower() == college_code.lower():
+            p["college_code"] = "NULL"
 
     new_colleges = [] #Filter out the college itself
     for c in colleges:
         if c["code"].lower() != college_code.lower():
             new_colleges.append(c)
 
-    write_csv(PROGRAM,  new_programs, PROGRAM_FIELDS)  #Write all three once each
-    write_csv(STUDENT,  new_students, STUDENT_FIELDS)
-    write_csv(COLLEGE,  new_colleges, COLLEGE_FIELDS)
+    write_csv(PROGRAM, programs, PROGRAM_FIELDS)
+    write_csv(COLLEGE, new_colleges, COLLEGE_FIELDS)
 
-def delete_program(program_code): #Cascading delete - program
-    new_programs = [] #Filter out the program
-    for p in read_csv(PROGRAM):
+def delete_program(program_code): #No cascading delete - linked students get program_code set to NULL
+    students = read_csv(STUDENT)
+    programs = read_csv(PROGRAM)
+
+    for s in students: #Null out the link instead of deleting linked students
+        if s["program_code"].lower() == program_code.lower():
+            s["program_code"] = "NULL"
+
+    new_programs = [] #Filter out the program itself
+    for p in programs:
         if p["code"].lower() != program_code.lower():
             new_programs.append(p)
 
-    new_students = [] #Filter out linked students in one pass
-    for s in read_csv(STUDENT):
-        if s["program_code"].lower() != program_code.lower():
-            new_students.append(s)
-
+    write_csv(STUDENT, students, STUDENT_FIELDS)
     write_csv(PROGRAM, new_programs, PROGRAM_FIELDS)
-    write_csv(STUDENT, new_students, STUDENT_FIELDS)
