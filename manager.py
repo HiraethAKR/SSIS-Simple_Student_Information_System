@@ -235,33 +235,49 @@ def format_check(student_id): #Check if ID follows YYYY-NNNN format
 
 def update_college(old_code, new_record): #Cascading update for college
     new_code = new_record["code"]
-    update_record(COLLEGE, "code", old_code, new_record, COLLEGE_FIELDS) #Update the college record first
-
-    if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
-        connection = get_connection()
-        try:
+    connection = get_connection()
+    try:
+        #Foreign keys are OFF by default per-connection unless explicitly enabled.
+        #We deliberately do NOT enable them here: renaming a code briefly makes
+        #child rows point at a code that doesn't exist yet, and we fix that up
+        #in the very next statement within the same transaction anyway.
+        connection.execute(
+            "UPDATE colleges SET name = ?, code = ? WHERE code = ?",
+            [new_record["name"], new_code, old_code] #Update the college record first
+        )
+        if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
             connection.execute(
                 "UPDATE programs SET college_code = ? WHERE college_code = ?",
                 [new_code, old_code] #Set new college code for all programs that had the old one
             )
-            connection.commit() #save
-        finally:
-            connection.close() #close
+        connection.commit() #Both updates commit together
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 def update_program(old_code, new_record): #Cascading update for program
     new_code = new_record["code"]
-    update_record(PROGRAM, "code", old_code, new_record, PROGRAM_FIELDS) #Update the program record first
-
-    if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
-        connection = get_connection()
-        try:
+    connection = get_connection()
+    try:
+        #Same reasoning as update_college: leave FK enforcement off for this
+        #operation so the brief mid-transaction mismatch isn't flagged.
+        connection.execute(
+            "UPDATE programs SET name = ?, college_code = ?, code = ? WHERE code = ?",
+            [new_record["name"], new_record["college_code"], new_code, old_code] #Update the program record first
+        )
+        if old_code.lower() != new_code.lower(): #Only cascade if the code actually changed
             connection.execute(
                 "UPDATE students SET program_code = ? WHERE program_code = ?",
                 [new_code, old_code] #Set new program code for all students that had the old one
             )
-            connection.commit() #save
-        finally:
-            connection.close() #close
+        connection.commit() #Both updates commit together
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 def delete_college(college_code): #No cascading delete - FK constraint sets linked programs' college_code to NULL automatically
     connection = get_connection()
