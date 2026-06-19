@@ -30,21 +30,21 @@ def init_files(): #Create tables if they dont exist with strict case-insensitive
             CREATE TABLE IF NOT EXISTS programs (
                 code         TEXT PRIMARY KEY COLLATE NOCASE,
                 name         TEXT NOT NULL,
-                college_code TEXT NOT NULL COLLATE NOCASE,
-                FOREIGN KEY (college_code) REFERENCES colleges(code)
+                college_code TEXT COLLATE NOCASE,
+                FOREIGN KEY (college_code) REFERENCES colleges(code) ON DELETE SET NULL
             )
-        """) #program
+        """) #program - college_code is nullable so deleting a college orphans (not deletes) its programs
         connection.execute("""
             CREATE TABLE IF NOT EXISTS students (
                 id           TEXT PRIMARY KEY COLLATE NOCASE,
                 firstname    TEXT NOT NULL,
                 lastname     TEXT NOT NULL,
-                program_code TEXT NOT NULL COLLATE NOCASE,
+                program_code TEXT COLLATE NOCASE,
                 year         TEXT NOT NULL,
                 gender       TEXT NOT NULL,
-                FOREIGN KEY (program_code) REFERENCES programs(code)
+                FOREIGN KEY (program_code) REFERENCES programs(code) ON DELETE SET NULL
             )
-        """) #students
+        """) #students - program_code is nullable so deleting a program orphans (not deletes) its students
         connection.commit() #Save the changes
     finally:
         connection.close() #Always close even if something goes wrong
@@ -263,36 +263,26 @@ def update_program(old_code, new_record): #Cascading update for program
         finally:
             connection.close() #close
 
-def delete_college(college_code): #Cascading delete for college
+def delete_college(college_code): #No cascading delete - FK constraint sets linked programs' college_code to NULL automatically
     connection = get_connection()
     try:
-        connection.execute(
-            "DELETE FROM students WHERE program_code IN (SELECT code FROM programs WHERE college_code = ?)",
-            [college_code] #Delete all students enrolled in programs under this college
-        )
-        connection.execute(
-            "DELETE FROM programs WHERE college_code = ?",
-            [college_code] #Delete all programs under this college
-        )
+        connection.execute("PRAGMA foreign_keys = ON;") #Required for ON DELETE SET NULL to fire
         connection.execute(
             "DELETE FROM colleges WHERE code = ?",
-            [college_code] #Delete the college itself
+            [college_code] #Delete the college; programs.college_code is set to NULL by the FK constraint
         )
-        connection.commit() #Save all three deletions
+        connection.commit()
     finally:
-        connection.close()  #Close
+        connection.close()
 
-def delete_program(program_code): #Cascading delete for program
+def delete_program(program_code): #No cascading delete - FK constraint sets linked students' program_code to NULL automatically
     connection = get_connection()
     try:
-        connection.execute(
-            "DELETE FROM students WHERE program_code = ?",
-            [program_code] #Delete all students under this program first
-        )
+        connection.execute("PRAGMA foreign_keys = ON;") #Required for ON DELETE SET NULL to fire
         connection.execute(
             "DELETE FROM programs WHERE code = ?",
-            [program_code] #Then delete the program itself
+            [program_code] #Delete the program; students.program_code is set to NULL by the FK constraint
         )
-        connection.commit() #Save both deletions
+        connection.commit()
     finally:
-        connection.close()  #Close
+        connection.close()
