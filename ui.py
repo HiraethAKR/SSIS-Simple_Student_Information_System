@@ -365,7 +365,7 @@ class App(ctk.CTk):
             table_row.pack_propagate(False)
 
             display_name = student["lastname"] + ", " + student["firstname"] #Format name as Lastname, Firstname
-            college_code = self.program_to_college.get(student["program_code"], "N/A") #Look up the college through the program
+            college_code = self.program_to_college.get(student["program_code"], "None") #Look up the college through the program
             ctk.CTkLabel(table_row, text=student["id"],           font=FONT_BOLD, width=120, anchor="w").pack(side="left", padx=8) #Student ID
             ctk.CTkLabel(table_row, text=display_name,            font=FONT_BOLD, width=190, anchor="w").pack(side="left", padx=8) #Student name
             ctk.CTkLabel(table_row, text=student["program_code"], font=FONT_BODY, width=100, anchor="w").pack(side="left", padx=8) #Program code
@@ -513,7 +513,7 @@ class App(ctk.CTk):
         edit_program_popup = PopupForm(self, "Edit Program", self._program_fields(program), save, initial=program) #Create popup with existing program data
 
     def _delete_program(self, program):
-        if messagebox.askyesno("Delete", f"Delete '{program['code']}'?\nAll enrolled students will also be deleted."): #Ask user to confirm deletion
+        if messagebox.askyesno("Delete", f"Delete '{program['code']}'?"): #Ask user to confirm deletion
             manager.delete_program(program["code"]) #Delete the program
             self._reload_data()
             self._refresh_programs(); self._refresh_students(); self._update_counters() #Refresh both tables and update counters
@@ -606,7 +606,7 @@ class App(ctk.CTk):
         edit_college_popup = PopupForm(self, "Edit College", self._college_fields(), save, initial=college) #Create popup existing college data
 
     def _delete_college(self, college):
-        if messagebox.askyesno("Delete", f"Delete '{college['code']}'?\nAll programs and students under it will also be deleted."): #Confirmation
+        if messagebox.askyesno("Delete", f"Delete '{college['code']}'?"): #Confirmation
             manager.delete_college(college["code"]) #Delete the college
             self._reload_data()
             self._refresh_colleges(); self._refresh_programs(); self._refresh_students(); self._update_counters() #Refresh all tables and update counters
