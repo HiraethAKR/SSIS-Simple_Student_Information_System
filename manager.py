@@ -16,29 +16,30 @@ STUDENT_FIELDS = ["id", "firstname", "lastname", "program_code", "year", "gender
 PROGRAM_FIELDS = ["code", "name", "college_code"]
 COLLEGE_FIELDS = ["code", "name"]
 
-def init_files(): #Create tables if they dont exist
+def init_files(): #Create tables if they dont exist with strict case-insensitive constraints
     connection = get_connection()
     try:
+        connection.execute("PRAGMA foreign_keys = ON;")
         connection.execute("""
             CREATE TABLE IF NOT EXISTS colleges (
-                code TEXT PRIMARY KEY,
+                code TEXT PRIMARY KEY COLLATE NOCASE,
                 name TEXT NOT NULL
             )
         """) #college
         connection.execute("""
             CREATE TABLE IF NOT EXISTS programs (
-                code         TEXT PRIMARY KEY,
+                code         TEXT PRIMARY KEY COLLATE NOCASE,
                 name         TEXT NOT NULL,
-                college_code TEXT NOT NULL,
+                college_code TEXT NOT NULL COLLATE NOCASE,
                 FOREIGN KEY (college_code) REFERENCES colleges(code)
             )
         """) #program
         connection.execute("""
             CREATE TABLE IF NOT EXISTS students (
-                id           TEXT PRIMARY KEY,
+                id           TEXT PRIMARY KEY COLLATE NOCASE,
                 firstname    TEXT NOT NULL,
                 lastname     TEXT NOT NULL,
-                program_code TEXT NOT NULL,
+                program_code TEXT NOT NULL COLLATE NOCASE,
                 year         TEXT NOT NULL,
                 gender       TEXT NOT NULL,
                 FOREIGN KEY (program_code) REFERENCES programs(code)
@@ -50,162 +51,157 @@ def init_files(): #Create tables if they dont exist
 
 def fetch_all(table): #Read all records from a table and return as a list of dictionaries
     connection = get_connection()
-    rows = connection.execute(f"SELECT * FROM {table}").fetchall() #Fetch all rows from the table
-    connection.close()
-    data = []
-    for row in rows:
-        data.append(dict(row)) #Convert each Row object to a dictionary
-    return data
+    try:
+        rows = connection.execute(f"SELECT * FROM {table}").fetchall() #Fetch all rows from the table
+        data = []
+        for row in rows:
+            data.append(dict(row)) #Convert each Row object to a dictionary
+        return data
+    finally:
+        connection.close()
 
 def get_students(search, sort_col, reverse, page, page_size): #Fetch one page of students from the database
     connection = get_connection()
+    try:
+        order  = "DESC" if reverse else "ASC" #Ascending or descending
+        offset = (page - 1) * page_size       #Calculate how many rows to skip
+        like   = f"%{search}%"                #Wrap search term in wildcards
 
-    order  = "DESC" if reverse else "ASC" #Ascending or descending
-    offset = (page - 1) * page_size       #Calculate how many rows to skip
-    like   = f"%{search}%"                #Wrap search term in wildcards
+        where = "WHERE s.id LIKE ? OR s.firstname LIKE ? OR s.lastname LIKE ? OR s.program_code LIKE ? OR s.year LIKE ? OR s.gender LIKE ?"
+        params = [like, like, like, like, like, like] #One placeholder per WHERE condition
 
-    where = "WHERE s.id LIKE ? OR s.firstname LIKE ? OR s.lastname LIKE ? OR s.program_code LIKE ? OR s.year LIKE ? OR s.gender LIKE ?"
-    params = [like, like, like, like, like, like] #One placeholder per WHERE condition
+        if sort_col == "college_code": #College isnt on the students table so we need a JOIN to sort by it
+            query = f"""
+                SELECT s.* FROM students s
+                JOIN programs p ON s.program_code = p.code
+                {where}
+                ORDER BY p.college_code {order}
+                LIMIT ? OFFSET ?
+            """
+        else:
+            sort_map = { #Map UI sort names to actual column names
+                "id":           "s.id",
+                "name":         "s.lastname",
+                "program_code": "s.program_code",
+                "year":         "s.year",
+                "gender":       "s.gender",
+            }
+            column = sort_map.get(sort_col, "s.id") #Default to id if not found
+            query = f"""
+                SELECT s.* FROM students s
+                {where}
+                ORDER BY {column} {order}
+                LIMIT ? OFFSET ?
+            """
 
-    if sort_col == "college_code": #College isnt on the students table so we need a JOIN to sort by it
-        query = f"""
-            SELECT s.* FROM students s
-            JOIN programs p ON s.program_code = p.code
-            {where}
-            ORDER BY p.college_code {order}
-            LIMIT ? OFFSET ?
-        """
-    else:
-        sort_map = { #Map UI sort names to actual column names
-            "id":           "s.id",
-            "name":         "s.lastname",
-            "program_code": "s.program_code",
-            "year":         "s.year",
-            "gender":       "s.gender",
-        }
-        column = sort_map.get(sort_col, "s.id") #Default to id if not found
-        query = f"""
-            SELECT s.* FROM students s
-            {where}
-            ORDER BY {column} {order}
-            LIMIT ? OFFSET ?
-        """
+        rows = connection.execute(query, params + [page_size, offset]).fetchall()
 
-    rows = connection.execute(query, params + [page_size, offset]).fetchall()
+        count_query = f"SELECT COUNT(*) FROM students s {where}"
+        total_count = connection.execute(count_query, params).fetchone()[0] #Get total matching rows for page calculation
 
-    count_query = f"SELECT COUNT(*) FROM students s {where}"
-    total_count = connection.execute(count_query, params).fetchone()[0] #Get total matching rows for page calculation
-
-    connection.close()
-
-    data = []
-    for row in rows:
-        data.append(dict(row)) #Convert to dictionaries
-    return data, total_count #Return the page and total count
+        data = []
+        for row in rows:
+            data.append(dict(row)) #Convert to dictionaries
+        return data, total_count #Return the page and total count
+    finally:
+        connection.close()
 
 def get_programs(search, sort_col, reverse, page, page_size): #Fetch one page of programs from the database
     connection = get_connection()
+    try:
+        order    = "DESC" if reverse else "ASC" #Ascending or descending
+        sort_map = { #Map UI sort names to actual column names
+            "code": "code",
+            "name": "name",
+        }
+        column = sort_map.get(sort_col, "code") #Default to code if not found
+        offset = (page - 1) * page_size         #Calculate how many rows to skip
 
-    order    = "DESC" if reverse else "ASC" #Ascending or descending
-    sort_map = { #Map UI sort names to actual column names
-        "code": "code",
-        "name": "name",
-    }
-    column = sort_map.get(sort_col, "code") #Default to code if not found
-    offset = (page - 1) * page_size         #Calculate how many rows to skip
+        query = f"""
+            SELECT * FROM programs
+            WHERE code LIKE ? OR name LIKE ? OR college_code LIKE ?
+            ORDER BY {column} {order}
+            LIMIT ? OFFSET ?
+        """
+        like = f"%{search}%" #Wrap search term in wildcards
+        rows = connection.execute(query, [like, like, like, page_size, offset]).fetchall()
 
-    query = f"""
-        SELECT * FROM programs
-        WHERE code LIKE ? OR name LIKE ? OR college_code LIKE ?
-        ORDER BY {column} {order}
-        LIMIT ? OFFSET ?
-    """
-    like = f"%{search}%" #Wrap search term in wildcards
-    rows = connection.execute(query, [like, like, like, page_size, offset]).fetchall()
+        count_query = "SELECT COUNT(*) FROM programs WHERE code LIKE ? OR name LIKE ? OR college_code LIKE ?"
+        total_count = connection.execute(count_query, [like, like, like]).fetchone()[0] #Get total matching rows for page calculation
 
-    count_query = "SELECT COUNT(*) FROM programs WHERE code LIKE ? OR name LIKE ? OR college_code LIKE ?"
-    total_count = connection.execute(count_query, [like, like, like]).fetchone()[0] #Get total matching rows for page calculation
-
-    connection.close()
-
-    data = []
-    for row in rows:
-        data.append(dict(row)) #Convert to dictionaries
-    return data, total_count #Return the page and total count
+        data = []
+        for row in rows:
+            data.append(dict(row)) #Convert to dictionaries
+        return data, total_count #Return the page and total count
+    finally:
+        connection.close()
 
 
 def get_colleges(search, sort_col, reverse, page, page_size): #Fetch one page of colleges from the database
     connection = get_connection()
+    try:
+        order    = "DESC" if reverse else "ASC" #Ascending or descending
+        sort_map = { #Map UI sort names to actual column names
+            "code": "code",
+            "name": "name",
+        }
+        column = sort_map.get(sort_col, "code") #Default to code if not found
+        offset = (page - 1) * page_size         #Calculate how many rows to skip
 
-    order    = "DESC" if reverse else "ASC" #Ascending or descending
-    sort_map = { #Map UI sort names to actual column names
-        "code": "code",
-        "name": "name",
-    }
-    column = sort_map.get(sort_col, "code") #Default to code if not found
-    offset = (page - 1) * page_size         #Calculate how many rows to skip
+        query = f"""
+            SELECT * FROM colleges
+            WHERE code LIKE ? OR name LIKE ?
+            ORDER BY {column} {order}
+            LIMIT ? OFFSET ?
+        """
+        like = f"%{search}%" #Wrap search term in wildcards
+        rows = connection.execute(query, [like, like, page_size, offset]).fetchall()
 
-    query = f"""
-        SELECT * FROM colleges
-        WHERE code LIKE ? OR name LIKE ?
-        ORDER BY {column} {order}
-        LIMIT ? OFFSET ?
-    """
-    like = f"%{search}%" #Wrap search term in wildcards
-    rows = connection.execute(query, [like, like, page_size, offset]).fetchall()
+        count_query = "SELECT COUNT(*) FROM colleges WHERE code LIKE ? OR name LIKE ?"
+        total_count = connection.execute(count_query, [like, like]).fetchone()[0] #Get total matching rows for page calculation
 
-    count_query = "SELECT COUNT(*) FROM colleges WHERE code LIKE ? OR name LIKE ?"
-    total_count = connection.execute(count_query, [like, like]).fetchone()[0] #Get total matching rows for page calculation
-
-    connection.close()
-
-    data = []
-    for row in rows:
-        data.append(dict(row)) #Convert to dictionaries
-    return data, total_count #Return the page and total count
+        data = []
+        for row in rows:
+            data.append(dict(row)) #Convert to dictionaries
+        return data, total_count #Return the page and total count
+    finally:
+        connection.close()
 
 def add_record(table, record, fieldnames): #Insert a new record into the table
     connection = get_connection()
     try:
+        connection.execute("PRAGMA foreign_keys = ON;")
         placeholders = ", ".join(["?" for _ in fieldnames]) #Build "?, ?, ?" based on number of fields
         columns      = ", ".join(fieldnames)                #Build "id, firstname, lastname, ..."
         values       = [record[field] for field in fieldnames] #Pull values in the same order as columns
         connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", values)
         connection.commit() #Save
-        return True
-    except sqlite3.Error as e:
-        from tkinter import messagebox
-        messagebox.showerror("Database Error", f"Unable to save record: {e}")
-        return False
     finally:
         connection.close() #and close
 
-def add_records(table, records, fieldnames): #Insert multiple records in a single transaction
+def add_records(table, records, fieldnames): #Insert multiple records in a single transactional batch
     if not records:
-        return True
+        return
     connection = get_connection()
     try:
+        connection.execute("PRAGMA foreign_keys = ON;")
         placeholders = ", ".join(["?" for _ in fieldnames])
         columns      = ", ".join(fieldnames)
-        query        = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+        query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
         
-        data_tuples = []
-        for r in records:
-            data_tuples.append([r[field] for field in fieldnames])
+        values_list = []
+        for record in records:
+            values_list.append([record[field] for field in fieldnames])
             
-        connection.executemany(query, data_tuples)
+        connection.executemany(query, values_list)
         connection.commit()
-        return True
-    except sqlite3.Error as e:
-        from tkinter import messagebox
-        messagebox.showerror("Database Error", f"Bulk write operation failed: {e}")
-        return False
     finally:
         connection.close()
 
 def update_record(table, pk_field, pk_value, updated_record, fieldnames): #Update a record in the table
     connection = get_connection()
     try:
+        connection.execute("PRAGMA foreign_keys = ON;")
         update_fields = [field for field in fieldnames if field != pk_field] #Dont include the primary key in the SET clause
         set_clause    = ", ".join([f"{field} = ?" for field in update_fields]) #Build "firstname = ?, lastname = ?, ..."
         values        = [updated_record[field] for field in update_fields]     #Pull values in the same order
@@ -213,24 +209,15 @@ def update_record(table, pk_field, pk_value, updated_record, fieldnames): #Updat
         values.append(pk_value)                                                #Add the old pk value for the WHERE clause
         connection.execute(f"UPDATE {table} SET {set_clause}, {pk_field} = ? WHERE {pk_field} = ?", values)
         connection.commit() #save
-        return True
-    except sqlite3.Error as e:
-        from tkinter import messagebox
-        messagebox.showerror("Database Error", f"Unable to update record: {e}")
-        return False
     finally:
         connection.close() #close
 
 def delete_record(table, pk_field, pk_value): #Delete a record from the table
     connection = get_connection()
     try:
+        connection.execute("PRAGMA foreign_keys = ON;")
         connection.execute(f"DELETE FROM {table} WHERE {pk_field} = ?", [pk_value]) #Delete record with matching pk value
         connection.commit() #save
-        return True
-    except sqlite3.Error as e:
-        from tkinter import messagebox
-        messagebox.showerror("Database Error", f"Unable to delete record: {e}")
-        return False
     finally:
         connection.close() #close
 
@@ -258,9 +245,6 @@ def update_college(old_code, new_record): #Cascading update for college
                 [new_code, old_code] #Set new college code for all programs that had the old one
             )
             connection.commit() #save
-        except sqlite3.Error as e:
-            from tkinter import messagebox
-            messagebox.showerror("Database Error", f"Cascading college update failed: {e}")
         finally:
             connection.close() #close
 
@@ -276,9 +260,6 @@ def update_program(old_code, new_record): #Cascading update for program
                 [new_code, old_code] #Set new program code for all students that had the old one
             )
             connection.commit() #save
-        except sqlite3.Error as e:
-            from tkinter import messagebox
-            messagebox.showerror("Database Error", f"Cascading program update failed: {e}")
         finally:
             connection.close() #close
 
@@ -298,9 +279,6 @@ def delete_college(college_code): #Cascading delete for college
             [college_code] #Delete the college itself
         )
         connection.commit() #Save all three deletions
-    except sqlite3.Error as e:
-        from tkinter import messagebox
-        messagebox.showerror("Database Error", f"Cascading college deletion failed: {e}")
     finally:
         connection.close()  #Close
 
@@ -316,8 +294,5 @@ def delete_program(program_code): #Cascading delete for program
             [program_code] #Then delete the program itself
         )
         connection.commit() #Save both deletions
-    except sqlite3.Error as e:
-        from tkinter import messagebox
-        messagebox.showerror("Database Error", f"Cascading program deletion failed: {e}")
     finally:
         connection.close()  #Close

@@ -100,7 +100,7 @@ class App(ctk.CTk):
         self.all_students = manager.fetch_all(manager.STUDENT) #Reload students
         self.all_programs = manager.fetch_all(manager.PROGRAM) #Reload programs
         self.all_colleges = manager.fetch_all(manager.COLLEGE) #Reload colleges
-        self.program_to_college = {} #Rebuild the lookup too
+        self.program_to_college = {} #Rebuild the lookup too (using lowercase keys for robustness)
         for p in self.all_programs:
             self.program_to_college[p["code"].lower()] = p["college_code"]
 
@@ -364,7 +364,7 @@ class App(ctk.CTk):
 
         for row_index, student in enumerate(page_of_students): #Insert each student as a treeview row
             display_name = student["lastname"] + ", " + student["firstname"] #Format name as Lastname, Firstname
-            college_code = self.program_to_college.get((student["program_code"] or "").lower(), "N/A") #Look up the college through the program (with lowercase logic)
+            college_code = self.program_to_college.get((student["program_code"] or "").lower(), "N/A") #Look up the college through the program (normalized to lowercase keys)
             tag = "odd" if row_index % 2 == 0 else "even" #Alternate row colors
             self.student_tree.insert("", "end", iid=student["id"], tags=(tag,), #Use student ID as the row identifier
                                      values=(student["id"], display_name, student["program_code"],
